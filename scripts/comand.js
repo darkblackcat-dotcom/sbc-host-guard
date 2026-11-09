@@ -1,4 +1,3 @@
-// commands.js — чат-команды (анти-чит + /skip для админа)
 
 const ac = require("anticheat");
 
@@ -10,21 +9,21 @@ const NAMES = ["status", "list", "strikes", "unban", "reset", "anticheat", "puni
 
 // Админские команды: не показываются в /help, их список виден админам в /admin
 const ADMIN_ONLY = ["strikes", "unban", "reset", "anticheat", "punish", "skip", "disconnect",
-    "antivirus", "log", "rollback", "trust", "untrust", "voteclose", "vc", "a",
+    "antivirus", "guard", "votelock", "log", "rollback", "trust", "untrust", "a",
     "killun", "editor", "infres", "pause"];
 
 // Порядок команд в /help: сверху вниз. Меняйте порядок имён как нужно.
 // Команды, которых нет в списке (например, встроенные /t, /votekick), идут
 // после этих, по алфавиту.
 // "admin" стоит первой: у админов /admin - первая команда в /help.
-const HELP_ORDER = ["admin", "list", "log", "vc", "rollback", "trust", "skip", "strikes", "reset", "untrust", "unban", "killun", "a", "help", "status", "voteclose", "anticheat", "antivirus", "punish",
+const HELP_ORDER = ["admin", "list", "log", "rollback", "trust", "skip", "strikes", "reset", "untrust", "unban", "killun", "a", "help", "status", "anticheat", "antivirus", "guard", "votelock", "punish",
     "editor", "infres", "pause", "disconnect"];
 
 function makeRunner(fn) {
     return new Packages.arc.util.CommandHandler.CommandRunner({
         accept: function(args, player) {
             try {
-                if (!ac.isServer()) return; // сервер не запущен - команды не работают
+                if (!ac.isServer()) return;
                 fn(args, player);
             } catch (e) {
                 Log.err("[commands] " + e);
@@ -55,16 +54,6 @@ function withTarget(fn) {
     });
 }
 
-// on/off/true/false -> true/false, пустой аргумент -> переключить, иначе null
-function parseBool(arg, current) {
-    if (arg == null) return !current;
-    const s = String(arg).toLowerCase();
-    if (["true", "on", "1", "yes", "да", "вкл"].indexOf(s) >= 0) return true;
-    if (["false", "off", "0", "no", "нет", "выкл"].indexOf(s) >= 0) return false;
-    return null;
-}
-
-// Страница списка команд: обычные (admin = false) или админские (admin = true)
 function showCommandList(h, player, args, admin) {
     const entries = [];
     h.getCommandList().each(cmd => {
@@ -77,7 +66,6 @@ function showCommandList(h, player, args, admin) {
         });
     });
 
-    // сортировка по HELP_ORDER, остальные после них по алфавиту
     entries.sort((a, b) => {
         let ia = HELP_ORDER.indexOf(a.name);
         let ib = HELP_ORDER.indexOf(b.name);
@@ -168,17 +156,12 @@ function registerCommands() {
         player.sendMessage("[green]Сбросил страйки " + t.name);
     }));
 
-    h.register("anticheat", "[on/off]", "Включить/выключить античит (без аргумента - переключить)", adminOnly(function(args, player) {
-        const v = parseBool(args[0], ac.isEnabled());
-        if (v === null) {
-            player.sendMessage("[scarlet]Укажи on или off.");
-            return;
-        }
+    h.register("anticheat", "", "Включить/выключить античит", adminOnly(function(args, player) {
+        const v = !ac.isSwitchOn();
         ac.setEnabled(v);
         Call.sendMessage("[scarlet][anticheat][white] " + player.name + "[white]: античит " + (v ? "включён" : "выключен"));
     }));
 
-    // ===== Вид наказания (только админ): /punish [derelict/freeze] =====
     h.register("punish", "[derelict/freeze]", "Вид наказания: derelict или freeze (без аргумента - показать)", adminOnly(function(args, player) {
         if (args.length == 0) {
             player.sendMessage("[accent]Вид наказания: [white]" + ac.getPunishMode());
@@ -193,7 +176,6 @@ function registerCommands() {
         Call.sendMessage("[scarlet][anticheat][white] " + player.name + "[white]: вид наказания - " + v);
     }));
 
-    // ===== Пропуск волн (только админ): /skip или /skip 1..5 =====
     h.register("skip", "[count]", "Пропустить волны (1-" + MAX_SKIP + ")", adminOnly(function(args, player) {
         const n = args.length > 0 ? parseInt(args[0]) : 1;
 
@@ -211,7 +193,6 @@ function registerCommands() {
         Call.sendMessage("[accent][skip][white] " + player.name + "[white] пропустил волн: " + n);
     }));
 
-    // ===== Удалить юнитов своей команды (только админ): /killunits [type] =====
     h.register("killun", "[unitType]", "Удалить юнитов твоей команды выбранного типа (без аргумента - всех)", adminOnly(function(args, player) {
         const team = player.team();
         let type = null;
@@ -226,7 +207,7 @@ function registerCommands() {
         const victims = [];
         Groups.unit.each(u => {
             if (u.team != team) return;
-            if (u.isPlayer()) return; // юниты, которыми управляют игроки, не трогаем
+            if (u.isPlayer()) return;
             if (type != null && u.type != type) return;
             victims.push(u);
         });
@@ -236,7 +217,6 @@ function registerCommands() {
             + (type != null ? " (" + type.name + ")" : "") + ": " + victims.length);
     }));
 
-    // ===== Vars.state.rules.editor (только админ): /editor [on/off] =====
     h.register("editor", "", "Переключить режим редактора", adminOnly(function(args, player) {
         const v = !Vars.state.rules.editor;
         Vars.state.rules.editor = v;
@@ -244,7 +224,6 @@ function registerCommands() {
         Call.sendMessage("[accent][editor][white] " + player.name + "[white]: editor " + (v ? "включён" : "выключен"));
     }));
 
-    // ===== Vars.state.rules.infiniteResources (только админ): /infres [on/off] =====
     h.register("infres", "", "Переключить бесконечные ресурсы", adminOnly(function(args, player) {
         const v = !Vars.state.rules.infiniteResources;
         Vars.state.rules.infiniteResources = v;
@@ -252,7 +231,6 @@ function registerCommands() {
         Call.sendMessage("[accent][infres][white] " + player.name + "[white]: бесконечные ресурсы " + (v ? "включены" : "выключены"));
     }));
 
-    // ===== Пауза (только админ): /pause - переключатель =====
     h.register("pause", "", "Переключить паузу", adminOnly(function(args, player) {
         const S = Packages.mindustry.core.GameState.State;
         const v = !ac.isPaused();
@@ -260,7 +238,6 @@ function registerCommands() {
         Call.sendMessage("[accent][pause][white] " + player.name + "[white]: пауза " + (v ? "включена" : "выключена"));
     }));
 
-    // ===== Отключить сеть (только хост) =====
     h.register("disconnect", "", "Отключить сеть (только хост)", makeRunner(function(args, player) {
         if (!player.isLocal()) {
             player.sendMessage("[scarlet]Только для хоста.");
@@ -270,7 +247,6 @@ function registerCommands() {
         Time.run(60, () => Vars.net.disconnect());
     }));
 
-    // ===== /help: обычные команды, /admin: админские =====
     h.register("help", "[page]", "Список команд", makeRunner(function(args, player) {
         showCommandList(h, player, args, false);
     }));

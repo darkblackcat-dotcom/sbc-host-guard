@@ -1,33 +1,31 @@
-// guard.js — режим новичка, журнал построек (/log) и откат действий (/rollback)
-// Работает только при включённом античите.
-//
-//  - Новичок (первые NEWBIE_MINUTES минут после входа, пока его не сделали доверенным):
-//    не может ломать, настраивать и вращать чужие блоки и заменять их.
-//  - Каждая постройка и разрушение записываются в журнал (в памяти, до перезапуска).
-//  - /rollback возвращает действия игрока: сломанное восстанавливает, поставленное убирает.
-//    Из grief.js откат запускается автоматически после бана.
 
 const ac = require("anticheat");
 
-// ===== Настройки =====
+let enabled = true;   // защита включена (переключается командой /guard)
+
+function active() {
+    return enabled && ac.isServer();
+}
+
 const NEWBIE_MINUTES = 5;  // сколько минут игрок считается новичком
 const AUTO_TRUST = true;    // true: после NEWBIE_MINUTES игрок становится доверенным до закрытия сервера
 const LOG_MAX = 5000;       // сколько записей хранить в журнале
 const LOG_PER_PAGE = 16;     // строк на странице /log
+const DANGEROUS_BLOCKS = ["thorium-reactor"]; // внутренние имена блоков, добавляйте свои
+// Опасные блоки возле ядра (DANGER_RADIUS_TILES) могут ставить ТОЛЬКО хост и админы.
+const DANGER_RADIUS_TILES = 25;               // радиус от ядра (в тайлах)
 const OWN_ONLY = ["breakBlock", "configure", "rotate"]; // новичок может это делать только со своими блоками
 
 const actionLog = [];        // записи: { t, u, n, a: "p"|"b", blk, x, y, rot, team, cfg }
 const owner = {};      // "x,y" -> { u: uuid, b: имя блока }
 const joined = {};     // uuid -> время входа
 const lastMsg = {};    // uuid -> когда последний раз писали о запрете
+const lastDangerMsg = {}; // uuid -> когда последний раз писали о запрете опасного блока
 let trusted = {};      // uuid -> true
 let warned = false;
 
-// ========== ДОВЕРЕННЫЕ ==========
-// Доверие хранится только в памяти: сбрасывается только при закрытии/перезапуске сервера (выход игрока его не сбрасывает).
-
 function isRestricted(p) {
-    if (!ac.isEnabled() || ac.isAdmin(p)) return false;
+    if (!active() || ac.isAdmin(p)) return false;
 
     const uuid = p.uuid();
     if (trusted[uuid]) return false;
@@ -42,7 +40,6 @@ function isRestricted(p) {
     return true;
 }
 
-// ========== ВЛАДЕЛЬЦЫ БЛОКОВ ==========
 const CONSTRUCT = /^build\d+$/;
 
 function keyOf(t) {
@@ -53,7 +50,6 @@ function originOf(tile) {
     return tile.build != null ? tile.build.tile : tile;
 }
 
-// Имя блока на тайле; для блока в процессе стройки - имя того, что строится
 function blockNameAt(tile) {
     let name = String(tile.block().name);
     if (CONSTRUCT.test(name) && tile.build != null) {
@@ -68,7 +64,6 @@ function isOwn(uuid, tile) {
     return o != null && o.u == uuid && o.b == blockNameAt(tile);
 }
 
-// ========== ЖУРНАЛ ==========
 function pushLog(e) {
     const last = actionLog.length > 0 ? actionLog[actionLog.length - 1] : null;
     if (last != null && last.u == e.u && last.a == e.a && last.x == e.x && last.y == e.y && last.blk == e.blk) return;
@@ -77,8 +72,6 @@ function pushLog(e) {
     if (actionLog.length > LOG_MAX) actionLog.splice(0, 500);
 }
 
-// ========== ОТКАТ ==========
-// Возвращает 1, если блок восстановлен, 2, если убран, 0, если ничего не сделано
 function revert(e) {
     const tile = Vars.world.tile(e.x, e.y);
     if (tile == null) return 0;
@@ -89,9 +82,6 @@ function revert(e) {
     const team = Team.get(e.team);
 
     if (e.a == "p") {
-        // игрок поставил блок: убираем, если он до сих пор стоит.
-        // blockNameAt учитывает и недостроенные блоки (build1, build2...): после бана игрока
-        // очередь стройки обрывается, и всё, что не успели достроить, остаётся на карте.
         if (tile.build != null && tile.team() == team && blockNameAt(tile) == e.blk) {
             tile.setNet(Blocks.air);
             delete owner[e.x + "," + e.y];
@@ -100,7 +90,6 @@ function revert(e) {
         return 0;
     }
 
-    // игрок сломал блок: восстанавливаем, если место свободно
     if (tile.block() == Blocks.air && Packages.mindustry.world.Build.validPlace(block, team, e.x, e.y, e.rot)) {
         tile.setNet(block, team, e.rot);
         if (e.cfg != null && tile.build != null) {
@@ -111,8 +100,6 @@ function revert(e) {
     return 0;
 }
 
-// Откатить действия игрока за последние minutes минут (0 - все в журнале).
-// Возвращает число найденных действий; когда откат закончится, вызывается done(восстановлено, убрано).
 function rollback(uuid, minutes, done) {
     const since = minutes > 0 ? Time.millis() - minutes * 60000 : 0;
     const list = [];
@@ -127,16 +114,14 @@ function rollback(uuid, minutes, done) {
     let removed = 0;
     let skipped = 0;
 
-
-    // по 100 действий за кадр, чтобы не вешать игру
     function step() {
         try {
             const end = Math.min(idx + 100, list.length);
             for (; idx < end; idx++) {
                 try {
                     const r = revert(list[idx]);
-                    if (r == 1) restored++;
-                    else if (r == 2) removed++;
+                    if (r == 1) { restored++; list[idx].done = true; }
+                    else if (r == 2) { removed++; list[idx].done = true; }
                     else skipped++;
                 } catch (err) {
                     skipped++;
@@ -145,12 +130,16 @@ function rollback(uuid, minutes, done) {
             }
         } catch (err) {
             Log.err("[guard] сбой пакета отката: " + err);
-            idx = list.length; // иначе откат зависнет и не доложит итог
+            idx = list.length;
         }
         if (idx < list.length) {
-            // следующий пакет в следующем кадре
             Core.app.post(() => Time.run(1, step));
         } else {
+            let w = 0;
+            for (let i = 0; i < actionLog.length; i++) {
+                if (!actionLog[i].done) actionLog[w++] = actionLog[i];
+            }
+            actionLog.length = w;
             if (done != null) done(restored, removed);
         }
     }
@@ -159,7 +148,29 @@ function rollback(uuid, minutes, done) {
     return list.length;
 }
 
-// ========== ФИЛЬТР ДЕЙСТВИЙ ==========
+function isPrivileged(p) {
+    if (Vars.player != null && p == Vars.player) return true;
+    if (p.admin) return true;
+    return ac.isAdmin(p);
+}
+
+function dangerNearCore(p, action) {
+    const block = action.block;
+    const tile = action.tile;
+    if (block == null || tile == null) return false;
+    if (DANGEROUS_BLOCKS.indexOf(String(block.name)) < 0) return false;
+
+    const wx = tile.worldx();
+    const wy = tile.worldy();
+    const r = DANGER_RADIUS_TILES * Vars.tilesize;
+
+    let near = false;
+    p.team().data().cores.each(core => {
+        if (core.dst(wx, wy) <= r) near = true;
+    });
+    return near;
+}
+
 function deny(p, text) {
     const uuid = p.uuid();
     const now = Time.millis();
@@ -179,13 +190,21 @@ function installActionFilter() {
     Vars.netServer.admins.addActionFilter(action => {
         try {
             const p = action.player;
-            if (p == null || !ac.isEnabled()) return true;
+            if (p == null || !active()) return true;
 
             const type = String(action.type);
             const uuid = p.uuid();
             const tile = action.tile;
 
-            // ----- ограничения новичка -----
+            if (type == "placeBlock" && !isPrivileged(p) && dangerNearCore(p, action)) {
+                const nowD = Time.millis();
+                if (lastDangerMsg[uuid] == null || nowD - lastDangerMsg[uuid] > 2000) {
+                    lastDangerMsg[uuid] = nowD;
+                    p.sendMessage("[scarlet]Этот блок могут ставить только хост и админы.");
+                }
+                return false;
+            }
+
             if (isRestricted(p)) {
                 if (OWN_ONLY.indexOf(type) >= 0 && !isOwn(uuid, tile)) {
                     return deny(p, "Новичкам пока можно трогать только свои блоки.");
@@ -198,15 +217,11 @@ function installActionFilter() {
                 }
             }
 
-            // ----- запись в журнал -----
             if (type == "placeBlock" && tile != null && action.block != null) {
                 const name = String(action.block.name);
                 const k = keyOf(tile);
                 const nowP = Time.millis();
                 const prev = owner[k];
-                // фильтр вызывается по много раз для одного и того же блока (пока он строится),
-                // из-за этого журнал забивался дублями и самые старые записи выталкивались.
-                // Один и тот же блок на той же клетке от того же игрока пишем не чаще раза в минуту.
                 const dup = prev != null && prev.u == uuid && prev.b == name && nowP - prev.t < 60000;
                 if (!dup) {
                     owner[k] = { u: uuid, b: name, t: nowP };
@@ -245,7 +260,7 @@ Events.on(PlayerJoin, e => {
     if (!ac.isServer()) return;
     const p = e.player;
     joined[p.uuid()] = Time.millis();
-    if (ac.isEnabled() && !ac.isAdmin(p) && !trusted[p.uuid()]) {
+    if (active() && !ac.isAdmin(p) && !trusted[p.uuid()]) {
         p.sendMessage("[accent]Первые " + NEWBIE_MINUTES + " мин нельзя ломать и заменять чужие блоки.");
     }
 });
@@ -254,11 +269,10 @@ Events.on(PlayerLeave, e => {
     const uuid = e.player.uuid();
     delete joined[uuid];
     delete lastMsg[uuid];
+    delete lastDangerMsg[uuid];
     delete hudShown[uuid];
-    // trusted не трогаем: список доверенных живёт до закрытия сервера
 });
 
-// ========== ТАЙМЕР НОВИЧКА НА ЭКРАНЕ (м:с) ==========
 const hudShown = {}; // uuid -> true, если игроку сейчас показан таймер
 
 function fmtTime(ms) {
@@ -276,7 +290,6 @@ function updateHud() {
         lastHudTick = now;
         if (!ac.isServer()) return;
 
-        // пауза: время новичка не идёт (сдвигаем время входа на длину паузы)
         if (ac.isPaused()) {
             for (let key in joined) joined[key] += passed;
         }
@@ -284,7 +297,6 @@ function updateHud() {
         Groups.player.each(p => {
             if (p.con == null) return;
             const uuid = p.uuid();
-            // на время наказания надпись новичка не показываем (там своя надпись про наказание)
             if (ac.jail[uuid] != null) return;
             if (isRestricted(p)) {
                 if (AUTO_TRUST && joined[uuid] != null) {
@@ -302,18 +314,17 @@ function updateHud() {
 
 Timer.schedule(updateHud, 1, 1);
 
-// ========== КОМАНДЫ (только админ) ==========
 function runner(fn) {
     return new Packages.arc.util.CommandHandler.CommandRunner({
         accept: function(args, player) {
             try {
-                if (!ac.isServer()) return; // сервер не запущен - команды не работают
+                if (!ac.isServer()) return;
                 if (!ac.isAdmin(player)) {
                     player.sendMessage("[scarlet]Только для админов/хоста.");
                     return;
                 }
-                if (!ac.isSwitchOn()) {
-                    player.sendMessage("[scarlet]Античит выключен.");
+                if (!enabled) {
+                    player.sendMessage("[scarlet]Guard выключен (включить: /guard).");
                     return;
                 }
                 fn(args, player);
@@ -325,9 +336,7 @@ function runner(fn) {
     });
 }
 
-// Игрок по номеру или по имени среди онлайн, иначе по имени в журнале (можно и вышедшего)
 function resolveTarget(arg) {
-    // число - это номер игрока из /list (работает и для вышедших), по журналу имён его не ищем
     if (/^\d+$/.test(String(arg))) {
         const n = ac.findByNumber(arg);
         return n != null ? { uuid: n.uuid, name: n.name } : null;
@@ -371,7 +380,6 @@ function cmdLog(args, player) {
         if (args.length > 1) page = parseInt(args[1]);
     }
 
-    // от новых к старым, подряд идущие одинаковые действия склеиваем
     const groups = [];
     for (let i = actionLog.length - 1; i >= 0; i--) {
         var e = actionLog[i];
@@ -446,8 +454,24 @@ function registerCommands() {
     if (!Vars.netServer) return;
     const h = Vars.netServer.clientCommands;
 
-    ["log", "rollback", "trust", "untrust"].forEach(n => { try { h.removeCommand(n); } catch (e) {} });
+    ["guard", "log", "rollback", "trust", "untrust"].forEach(n => { try { h.removeCommand(n); } catch (e) {} });
 
+    h.register("guard", "", "Включить/выключить guard: режим новичка, опасные блоки, журнал", new Packages.arc.util.CommandHandler.CommandRunner({
+        accept: function(args, player) {
+            try {
+                if (!ac.isServer()) return;
+                if (!ac.isAdmin(player)) {
+                    player.sendMessage("[scarlet]Только для админов/хоста.");
+                    return;
+                }
+                enabled = !enabled;
+                Call.sendMessage("[scarlet][guard][white] " + player.name + "[white]: guard " + (enabled ? "включён" : "выключен"));
+            } catch (e) {
+                Log.err("[guard] " + e);
+                player.sendMessage("[scarlet]Ошибка: " + e);
+            }
+        }
+    }));
     h.register("log", "[player] [page]", "Журнал построек и разрушений", runner(cmdLog));
     h.register("rollback", "<player> [minutes]", "Откатить действия игрока", runner(cmdRollback));
     h.register("trust", "<player>", "Сделать игрока доверенным (снять ограничения новичка)", runner((args, player) => cmdTrust(args, player, true)));
@@ -460,6 +484,7 @@ Events.on(ServerLoadEvent, registerCommands);
 module.exports = {
     rollback: rollback,
     isTrusted: function(p) { return !!trusted[p.uuid()]; },
-    isNewbie: isRestricted // true, пока игрок новичок (не админ, не доверенный, не вышло NEWBIE_MINUTES)
+    isEnabled: active,
+    isNewbie: isRestricted
 };
 

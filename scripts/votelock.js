@@ -1,16 +1,13 @@
-// votelock.js — игроку, на которого идёт встроенное голосование (/votekick),
-// запрещено строить и ломать блоки, пока голосование не закончится.
-// Работает только при включённом античите.
 
 const ac = require("anticheat");
 
 const MSG_COOLDOWN = 2000; // мс между сообщениями игроку
 
 const AT = Packages.mindustry.net.Administration$ActionType;
+let enabled = true;   // блокировка включена (переключается командой /votelock)
 let lastMsg = 0;
 let warned = false;
 
-// Игрок, на которого сейчас идёт голосование (или null)
 function voteTarget() {
     try {
         const R = Packages.arc.util.Reflect;
@@ -27,7 +24,7 @@ function voteTarget() {
 }
 
 Vars.netServer.admins.addActionFilter(action => {
-    if (!ac.isEnabled()) return true;
+    if (!enabled || !ac.isServer()) return true;
     if (action.type != AT.placeBlock && action.type != AT.breakBlock) return true;
 
     const p = action.player;
@@ -44,3 +41,29 @@ Vars.netServer.admins.addActionFilter(action => {
     return false;
 });
 
+function registerCommand() {
+    if (!Vars.netServer) return;
+    const h = Vars.netServer.clientCommands;
+
+    try { h.removeCommand("votelock"); } catch (e) {}
+
+    h.register("votelock", "", "Включить/выключить запрет строить цели /votekick", new Packages.arc.util.CommandHandler.CommandRunner({
+        accept: function(args, player) {
+            try {
+                if (!ac.isServer()) return;
+                if (!ac.isAdmin(player)) {
+                    player.sendMessage("[scarlet]Только для админов/хоста.");
+                    return;
+                }
+                enabled = !enabled;
+                Call.sendMessage("[scarlet][votelock][white] " + player.name + "[white]: votelock " + (enabled ? "включён" : "выключен"));
+            } catch (e) {
+                Log.err("[votelock] " + e);
+                player.sendMessage("[scarlet]Ошибка: " + e);
+            }
+        }
+    }));
+}
+
+registerCommand();
+Events.on(ServerLoadEvent, registerCommand);

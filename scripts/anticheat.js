@@ -1,4 +1,3 @@
-// anticheat.js — полный рабочий скрипт
 
 const CHECK_TICKS = 12;
 const MIN_ALLOWED = 48;
@@ -23,12 +22,9 @@ const RETURN_SETTLE_CHECKS = 20;  // сколько проверок ждать,
 const LOG_ONLY = false; // true: только писать в лог и чат, без наказаний
 let enabled = true;     // античит включён (переключается командой /anticheat)
 
-// Всё работает ТОЛЬКО пока запущен сервер (хост или выделенный сервер).
-// В одиночной игре, в меню и на клиенте мод ничего не делает.
 function serverActive() {
     try { return !!Vars.net.server(); } catch (e) { return false; }
 }
-// включён и сервер запущен
 function active() {
     return enabled && serverActive();
 }
@@ -74,13 +70,10 @@ function setPunishMode(v) {
     Core.settings.put(MODE_KEY, v == "freeze" ? "freeze" : "derelict");
 }
 
-// Пауза. У хоста с подключёнными игроками state.isPaused() возвращает false даже при State.paused,
-// поэтому проверяем само состояние игры.
 function gamePaused() {
     return Vars.state.is(Packages.mindustry.core.GameState.State.paused) || Vars.state.isPaused();
 }
 
-// Тот же вывод, что и у таймера новичка (setHudText): надпись по центру экрана сверху, обновляется на месте
 function showJailTime(p, ms) {
     const sec = Math.ceil(ms / 1000);
     if (shown[p.uuid()] === sec) return;
@@ -118,11 +111,9 @@ function derelictJail(p) {
     });
 }
 
-// Заморозка: игрок остаётся в своей команде, но не двигается и не стреляет
 function freezeJail(p) {
     const uuid = p.uuid();
 
-    // если режим сменили с derelict, возвращаем игрока в его команду
     if (p.team() == Team.derelict) {
         let home = homeTeam[uuid];
         if (home == null || home == Team.derelict) home = Vars.state.rules.defaultTeam;
@@ -133,8 +124,6 @@ function freezeJail(p) {
     const u = p.unit();
     if (u == null) return;
 
-    // эффекты действуют ровно столько, сколько осталось наказания (jail хранится в мс),
-    // и обновляются при каждой проверке, поэтому не слетают
     const left = jail[uuid] != null ? jail[uuid] : 0;
     const ticks = Math.max(60, Math.ceil(left / 1000 * 60));
     try {
@@ -192,7 +181,6 @@ function pvpViolation(p, moved, allowed) {
     }
 }
 
-// Ставит игрока в последнюю безопасную точку. true - вернули, false - точки нет
 function moveBack(p, u) {
     const s = safe[p.id];
     if (s == null || s.unit != u) return false;
@@ -210,7 +198,6 @@ function moveBack(p, u) {
     return true;
 }
 
-// Игрока только что вернули: ждём, пока клиент примет позицию. true - ещё ждём (проверки пропускаем)
 function holdPending(p, u) {
     const pend = pending[p.id];
     if (pend == null) return false;
@@ -223,21 +210,18 @@ function holdPending(p, u) {
     pend.left--;
     const off = Mathf.dst(u.x, u.y, pend.x, pend.y);
     if (off > RETURN_TOLERANCE && pend.left > 0) {
-        // клиент ещё шлёт старую позицию: ставим на место ещё раз, без нарушения
         try {
             u.set(pend.x, pend.y);
             u.vel.setZero();
             Call.setPosition(p.con, pend.x, pend.y);
         } catch (err) {}
     } else {
-        // встал на место (или время вышло): заново начинаем слежение отсюда
         delete pending[p.id];
         delete last[p.id];
     }
     return true;
 }
 
-// Возврат в последнюю безопасную точку вместо наказания. true - вернули, false - нужно наказывать
 function tryReturn(p, u, desc) {
     if (RETURN_FIRST <= 0) return false;
 
@@ -256,7 +240,6 @@ function tryReturn(p, u, desc) {
 }
 
 function punish(p, moved, allowed) {
-    // после каждого наказания возвраты (предупреждения) начинаются заново
     delete returns[p.uuid()];
 
     if (Vars.state.rules.pvp) {
@@ -279,7 +262,6 @@ function punish(p, moved, allowed) {
     applyJail(p);
 }
 
-// ========== НОМЕРА ИГРОКОВ ==========
 // Каждый игрок (кроме хоста) получает номер при первом входе. Номер и ник сохраняются
 // навсегда: после выхода и перезапуска игры у игрока остаётся тот же номер.
 const idByUuid = {};  // uuid -> номер
@@ -310,7 +292,6 @@ function loadIds() {
     }
 }
 
-// Список игроков очищается при запуске и закрытии сервера
 function clearIds() {
     for (let k in idByUuid) delete idByUuid[k];
     for (let k in uuidById) delete uuidById[k];
@@ -343,7 +324,6 @@ function idOf(p) {
     return id;
 }
 
-// Все игроки онлайн (кроме хоста) по порядку номеров, со страйками и наказанием
 function getPlayers() {
     const list = [];
     Groups.player.each(p => {
@@ -367,7 +347,6 @@ function findOnline(uuid) {
     return found;
 }
 
-// По номеру находит игрока, даже если он уже вышел: { id, uuid, name, player (или null) }
 function findByNumber(arg) {
     const id = parseInt(arg);
     const uuid = uuidById[id];
@@ -377,7 +356,6 @@ function findByNumber(arg) {
     return { id: id, uuid: uuid, name: online != null ? online.plainName() : nameById[id], player: online };
 }
 
-// Игрок онлайн по номеру или по части ника
 function findPlayerByNameOrNumber(arg) {
     if (!arg) return null;
     const s = String(arg);
@@ -405,7 +383,6 @@ function isAdmin(p) {
 function setEnabled(v) {
     enabled = v;
     if (!v) {
-        // античит выключен: возвращаем всех из derelict и забываем слежение
         Groups.player.each(p => {
             if (jail[p.uuid()] != null) release(p);
         });
@@ -415,11 +392,9 @@ function setEnabled(v) {
     }
 }
 
-// ========== ОСНОВНОЙ ЦИКЛ ==========
 Events.run(Trigger.update, () => {
     tick++;
 
-    // пауза: ничего не проверяем и не считаем время наказания
     if (gamePaused()) {
         wasPaused = true;
         lastCheck = Time.millis();
@@ -437,7 +412,6 @@ Events.run(Trigger.update, () => {
     const dt = Math.min(now - lastCheck, 2000);
     lastCheck = now;
 
-    // сколько тиков реально прошло: берём большее из игрового и реального времени
     const elapsed = Math.max(accDelta, dt / 1000 * 60, CHECK_TICKS);
     const lagged = wasPaused || maxFrameDelta > LAG_FRAME_DELTA || dt > CHECK_TICKS / 60 * 1000 + LAG_REAL_MS;
     accDelta = 0;
@@ -445,7 +419,6 @@ Events.run(Trigger.update, () => {
 
     if (!active()) return;
 
-    // после паузы или лага заново запоминаем позиции, этот круг пропускаем
     if (lagged) {
         wasPaused = false;
         for (let key in last) delete last[key];
@@ -456,7 +429,6 @@ Events.run(Trigger.update, () => {
 
         const uuid = p.uuid();
 
-        // Наказание
         if (jail[uuid] != null) {
             jail[uuid] -= dt;
 
@@ -466,7 +438,6 @@ Events.run(Trigger.update, () => {
             } else {
                 showJailTime(p, jail[uuid]);
                 applyJail(p);
-                // наказанного тоже удерживаем на точке возврата, пока клиент не примет позицию
                 if (pending[p.id] != null) holdPending(p, p.dead() ? null : p.unit());
             }
             return;
@@ -483,10 +454,8 @@ Events.run(Trigger.update, () => {
         const u = p.unit();
         const r = last[p.id];
 
-        // ===== Игрока только что вернули: ждём, пока клиент примет позицию =====
         if (holdPending(p, u)) return;
 
-        // ===== Корабль на суше =====
         if (u.type.naval && !u.type.flying) {
             const tile = u.tileOn();
             if (tile != null) {
@@ -507,7 +476,6 @@ Events.run(Trigger.update, () => {
             }
         }
 
-        // ===== Проверка скорости / телепорта =====
         if (r == null || r.unit != u || r.type != u.type) {
             last[p.id] = { unit: u, type: u.type, x: u.x, y: u.y, grace: GRACE_CHECKS };
             safe[p.id] = { unit: u, x: u.x, y: u.y };
@@ -566,7 +534,6 @@ Events.on(PlayerLeave, e => {
     delete shown[e.player.uuid()];
 });
 
-// ========== СБРОС ДАННЫХ ТОЛЬКО ПРИ ПЕРЕЗАПУСКЕ ХОСТА ==========
 function clearAllData() {
     for (let key in last) delete last[key];
     for (let key in safe) delete safe[key];
@@ -595,7 +562,6 @@ if (typeof ResetEvent !== "undefined") {
     });
 }
 
-// ========== ЗАПРЕТ ДЕЙСТВИЙ ДЛЯ НАКАЗАННЫХ ==========
 const lastBlockMsg = {};
 let filterInstalled = false;
 
@@ -620,7 +586,6 @@ function installActionFilter() {
     });
 }
 
-// Новый юнит у наказанного (респавн, смена юнита): сразу заново накладываем заморозку
 if (typeof UnitChangeEvent !== "undefined") {
     Events.on(UnitChangeEvent, e => {
         const p = e.player;
@@ -636,7 +601,6 @@ installActionFilter();
 Events.on(ServerLoadEvent, installActionFilter);
 Events.on(ClientLoadEvent, installActionFilter);
 
-// ========== ЭКСПОРТ ДЛЯ commands.js ==========
 module.exports = {
     strikes: strikes,
     pvpStrikes: pvpStrikes,
@@ -649,9 +613,9 @@ module.exports = {
     release: release,
     isAdmin: isAdmin,
     isPaused: gamePaused,
-    isEnabled: active,          // включён И сервер запущен
-    isServer: serverActive,     // сервер запущен
-    isSwitchOn: function() { return enabled; }, // сам переключатель /anticheat
+    isEnabled: active,
+    isServer: serverActive,
+    isSwitchOn: function() { return enabled; },
     setEnabled: setEnabled,
     getPunishMode: punishMode,
     setPunishMode: setPunishMode
