@@ -1,0 +1,11 @@
+{
+  "name": "sbc-host-guard",
+  "displayName": "HostGuard",
+  "author": "[#0]ЧЕРНЫЙ КОТ[]",
+  "description": "Атичит реагирует:\nтелепорт/ускорение,\nводоплаваюший на суше.\n Добовляет / команды для чата.\ndiscord: @dark_black_cat",
+  "version": "0.9",
+  "minGameVersion": "160",
+  "icon": "icon.png",
+  "hidden": "true",
+  "repo": "darkblackcat-dotcom/sbc-host-guard"
+}
