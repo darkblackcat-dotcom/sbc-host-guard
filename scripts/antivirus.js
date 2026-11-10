@@ -3,7 +3,6 @@ const S = require("hgsettings"); // числовые настройки беру
 const ac = require("anticheat");
 
 
-let enabled = true;     // антивирус включён (переключается командой /antivirus)
 let tick = 0;
 let warned = false;
 
@@ -86,7 +85,7 @@ function report(count, player) {
 
 if (typeof ConfigEvent !== "undefined") {
     Events.on(ConfigEvent, e => {
-        if (!enabled || !ac.isServer()) return;
+        if (!S.get("antivirus_on") || !ac.isServer()) return;
         const b = e.tile;
         if (b == null || !isProcessor(b)) return;
 
@@ -112,7 +111,7 @@ if (typeof ConfigEvent !== "undefined") {
 
 Events.run(Trigger.update, () => {
     tick++;
-    if (tick % S.get("scan_ticks") != 0 || !enabled) return;
+    if (tick % S.get("scan_ticks") != 0 || !S.get("antivirus_on")) return;
     if (!ac.isServer()) return;
     if (Vars.net.client()) {
         if (S.get("debug") && tick % (S.get("scan_ticks") * 5) == 0) Log.info("[antivirus] скан пропущен: игра работает как клиент");
@@ -141,31 +140,6 @@ Events.run(Trigger.update, () => {
     }
 });
 
-function registerCommand() {
-    if (!Vars.netServer) return;
-    const h = Vars.netServer.clientCommands;
 
-    try { h.removeCommand("antivirus"); } catch (e) {}
-
-    h.register("antivirus", "", "Включить/выключить антивирус", new Packages.arc.util.CommandHandler.CommandRunner({
-        accept: function(args, player) {
-            try {
-                if (!ac.isServer()) return;
-                if (!ac.isAdmin(player)) {
-                    player.sendMessage("[scarlet]Только для админов/хоста.");
-                    return;
-                }
-                enabled = !enabled;
-                Call.sendMessage("[scarlet][antivirus][white] " + player.name + "[white]: антивирус " + (enabled ? "включён" : "выключен"));
-            } catch (e) {
-                Log.err("[antivirus] " + e);
-                player.sendMessage("[scarlet]Ошибка: " + e);
-            }
-        }
-    }));
-}
-
-registerCommand();
-Events.on(ServerLoadEvent, registerCommand);
 
 if (S.get("debug")) Log.info("[antivirus] ConfigEvent доступен: " + (typeof ConfigEvent !== "undefined"));

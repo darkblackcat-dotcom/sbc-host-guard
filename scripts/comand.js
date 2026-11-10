@@ -4,19 +4,19 @@ const ac = require("anticheat");
 
 const HELP_PER_PAGE = 6;
 const LIST_PER_PAGE = 10; // игроков на странице /list
-const NAMES = ["status", "list", "strikes", "unban", "reset", "anticheat", "punish", "skip",
+const NAMES = ["status", "list", "strikes", "unban", "reset", "punish", "skip",
     "disconnect", "admin", "help", "killun", "editor", "infres", "pause"];
 
 // Админские команды: не показываются в /help, их список виден админам в /admin
-const ADMIN_ONLY = ["strikes", "unban", "reset", "anticheat", "punish", "skip", "disconnect",
-    "antivirus", "guard", "votelock", "log", "rollback", "trust", "untrust", "a",
+const ADMIN_ONLY = ["strikes", "unban", "reset", "punish", "skip", "disconnect",
+    "log", "rollback", "trust", "untrust", "a",
     "killun", "editor", "infres", "pause"];
 
 // Порядок команд в /help: сверху вниз. Меняйте порядок имён как нужно.
 // Команды, которых нет в списке (например, встроенные /t, /votekick), идут
 // после этих, по алфавиту.
 // "admin" стоит первой: у админов /admin - первая команда в /help.
-const HELP_ORDER = ["admin", "list", "log", "rollback", "trust", "skip", "strikes", "reset", "untrust", "unban", "killun", "a", "help", "status", "anticheat", "antivirus", "guard", "votelock", "punish",
+const HELP_ORDER = ["admin", "list", "log", "rollback", "trust", "skip", "strikes", "reset", "untrust", "unban", "killun", "a", "help", "status", "punish",
     "editor", "infres", "pause", "disconnect"];
 
 function makeRunner(fn) {
@@ -154,12 +154,6 @@ function registerCommands() {
         if (ac.jail[uuid] != null) ac.release(t);
         if (ac.save) ac.save();
         player.sendMessage("[green]Сбросил страйки " + t.name);
-    }));
-
-    h.register("anticheat", "", "Включить/выключить античит", adminOnly(function(args, player) {
-        const v = !ac.isSwitchOn();
-        ac.setEnabled(v);
-        Call.sendMessage("[scarlet][anticheat][white] " + player.name + "[white]: античит " + (v ? "включён" : "выключен"));
     }));
 
     h.register("punish", "[derelict/freeze]", "Вид наказания: derelict или freeze (без аргумента - показать)", adminOnly(function(args, player) {

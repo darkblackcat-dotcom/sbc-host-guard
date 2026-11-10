@@ -8,13 +8,12 @@ const S = require("hgsettings"); // числовые настройки беру
 // После возврата клиент ещё какое-то время может слать старую (читерскую) позицию.
 // Пока игрок не "встал" на место (в пределах RETURN_TOLERANCE), проверки не идут и нарушением это не считается.
 
-let enabled = true;     // античит включён (переключается командой /anticheat)
 
 function serverActive() {
     try { return !!Vars.net.server(); } catch (e) { return false; }
 }
 function active() {
-    return enabled && serverActive();
+    return S.get("anticheat_on") && serverActive();
 }
 
 // Вид наказания меняется командой /punish и хранится в настройках игры:
@@ -379,9 +378,14 @@ function isAdmin(p) {
     return p.admin || p.isLocal();
 }
 
-function setEnabled(v) {
-    enabled = v;
-    if (!v) {
+// Реакция на переключение античита в меню настроек (проверяется каждый тик)
+let prevOn = true;
+function syncEnabled() {
+    const on = S.get("anticheat_on");
+    if (on === prevOn) return;
+    prevOn = on;
+    Log.info("[anticheat] " + (on ? "включён" : "выключен") + " (меню настроек)");
+    if (!on) {
         Groups.player.each(p => {
             if (jail[p.uuid()] != null) release(p);
         });
@@ -392,6 +396,7 @@ function setEnabled(v) {
 }
 
 Events.run(Trigger.update, () => {
+    syncEnabled();
     tick++;
 
     if (gamePaused()) {
@@ -556,7 +561,6 @@ function clearAllData() {
     for (let key in homeTeam) delete homeTeam[key];
     for (let key in shown) delete shown[key];
 
-    enabled = true;
     tick = 0;
     lastCheck = Time.millis();
 
@@ -626,8 +630,6 @@ module.exports = {
     isPaused: gamePaused,
     isEnabled: active,
     isServer: serverActive,
-    isSwitchOn: function() { return enabled; },
-    setEnabled: setEnabled,
     getPunishMode: punishMode,
     setPunishMode: setPunishMode
 };

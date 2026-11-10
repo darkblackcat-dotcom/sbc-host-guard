@@ -2,10 +2,9 @@ const S = require("hgsettings"); // числовые настройки беру
 
 const ac = require("anticheat");
 
-let enabled = true;   // защита включена (переключается командой /guard)
 
 function active() {
-    return enabled && ac.isServer();
+    return S.get("guard_on") && ac.isServer();
 }
 
 const LOG_PER_PAGE = 16;     // строк на странице /log
@@ -320,8 +319,8 @@ function runner(fn) {
                     player.sendMessage("[scarlet]Только для админов/хоста.");
                     return;
                 }
-                if (!enabled) {
-                    player.sendMessage("[scarlet]Guard выключен (включить: /guard).");
+                if (!S.get("guard_on")) {
+                    player.sendMessage("[scarlet]Guard выключен (включить: Настройки -> HostGuard).");
                     return;
                 }
                 fn(args, player);
@@ -451,24 +450,8 @@ function registerCommands() {
     if (!Vars.netServer) return;
     const h = Vars.netServer.clientCommands;
 
-    ["guard", "log", "rollback", "trust", "untrust"].forEach(n => { try { h.removeCommand(n); } catch (e) {} });
+    ["log", "rollback", "trust", "untrust"].forEach(n => { try { h.removeCommand(n); } catch (e) {} });
 
-    h.register("guard", "", "Включить/выключить guard: режим новичка, опасные блоки, журнал", new Packages.arc.util.CommandHandler.CommandRunner({
-        accept: function(args, player) {
-            try {
-                if (!ac.isServer()) return;
-                if (!ac.isAdmin(player)) {
-                    player.sendMessage("[scarlet]Только для админов/хоста.");
-                    return;
-                }
-                enabled = !enabled;
-                Call.sendMessage("[scarlet][guard][white] " + player.name + "[white]: guard " + (enabled ? "включён" : "выключен"));
-            } catch (e) {
-                Log.err("[guard] " + e);
-                player.sendMessage("[scarlet]Ошибка: " + e);
-            }
-        }
-    }));
     h.register("log", "[player] [page]", "Журнал построек и разрушений", runner(cmdLog));
     h.register("rollback", "<player> [minutes]", "Откатить действия игрока", runner(cmdRollback));
     h.register("trust", "<player>", "Сделать игрока доверенным (снять ограничения новичка)", runner((args, player) => cmdTrust(args, player, true)));
