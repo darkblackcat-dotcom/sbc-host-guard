@@ -1,3 +1,4 @@
+require("hgsettings");
 require("anticheat");
 require("guard");
 require("antivirus");

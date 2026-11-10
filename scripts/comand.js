@@ -1,7 +1,7 @@
+const S = require("hgsettings"); // числовые настройки берутся из меню: Настройки -> HostGuard
 
 const ac = require("anticheat");
 
-const MAX_SKIP = 5;
 const HELP_PER_PAGE = 6;
 const LIST_PER_PAGE = 10; // игроков на странице /list
 const NAMES = ["status", "list", "strikes", "unban", "reset", "anticheat", "punish", "skip",
@@ -176,11 +176,11 @@ function registerCommands() {
         Call.sendMessage("[scarlet][anticheat][white] " + player.name + "[white]: вид наказания - " + v);
     }));
 
-    h.register("skip", "[count]", "Пропустить волны (1-" + MAX_SKIP + ")", adminOnly(function(args, player) {
+    h.register("skip", "[count]", "Пропустить волны (1-" + S.get("max_skip") + ")", adminOnly(function(args, player) {
         const n = args.length > 0 ? parseInt(args[0]) : 1;
 
-        if (isNaN(n) || n < 1 || n > MAX_SKIP) {
-            player.sendMessage("[scarlet]Укажи число от 1 до " + MAX_SKIP);
+        if (isNaN(n) || n < 1 || n > S.get("max_skip")) {
+            player.sendMessage("[scarlet]Укажи число от 1 до " + S.get("max_skip"));
             return;
         }
         if (!Vars.state.rules.waves) {

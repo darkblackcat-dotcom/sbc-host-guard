@@ -1,8 +1,7 @@
+const S = require("hgsettings"); // числовые настройки берутся из меню: Настройки -> HostGuard
 
 const ac = require("anticheat");
 
-const SCAN_TICKS = 120;         // как часто проверять все процессоры (60 тиков = 1 секунда)
-const DEBUG = false;           // true - писать в лог, что проверяется (для поиска причины, если не срабатывает)
 
 let enabled = true;     // антивирус включён (переключается командой /antivirus)
 let tick = 0;
@@ -97,7 +96,7 @@ if (typeof ConfigEvent !== "undefined") {
                 if (!b.isValid()) return;
                 const code = "" + b.code;
                 const virus = isVirus(code);
-                if (DEBUG) Log.info("[antivirus] ConfigEvent: процессор, длина кода " + code.length + ", вирус: " + virus);
+                if (S.get("debug")) Log.info("[antivirus] ConfigEvent: процессор, длина кода " + code.length + ", вирус: " + virus);
                 if (!virus) return;
                 b.tile.setNet(Blocks.air);
                 report(1, player);
@@ -113,10 +112,10 @@ if (typeof ConfigEvent !== "undefined") {
 
 Events.run(Trigger.update, () => {
     tick++;
-    if (tick % SCAN_TICKS != 0 || !enabled) return;
+    if (tick % S.get("scan_ticks") != 0 || !enabled) return;
     if (!ac.isServer()) return;
     if (Vars.net.client()) {
-        if (DEBUG && tick % (SCAN_TICKS * 5) == 0) Log.info("[antivirus] скан пропущен: игра работает как клиент");
+        if (S.get("debug") && tick % (S.get("scan_ticks") * 5) == 0) Log.info("[antivirus] скан пропущен: игра работает как клиент");
         return;
     }
 
@@ -130,7 +129,7 @@ Events.run(Trigger.update, () => {
             if (code.indexOf("build") >= 0) withBuild++;
             if (isVirus(code)) found.push(b);
         });
-        if (DEBUG && tick % (SCAN_TICKS * 5) == 0) {
+        if (S.get("debug") && tick % (S.get("scan_ticks") * 5) == 0) {
             Log.info("[antivirus] скан: процессоров " + n + ", с build " + withBuild + ", вирусов " + found.length);
         }
         if (found.length == 0) return;
@@ -169,4 +168,4 @@ function registerCommand() {
 registerCommand();
 Events.on(ServerLoadEvent, registerCommand);
 
-if (DEBUG) Log.info("[antivirus] ConfigEvent доступен: " + (typeof ConfigEvent !== "undefined"));
+if (S.get("debug")) Log.info("[antivirus] ConfigEvent доступен: " + (typeof ConfigEvent !== "undefined"));

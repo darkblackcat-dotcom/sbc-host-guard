@@ -1,25 +1,13 @@
+const S = require("hgsettings"); // числовые настройки берутся из меню: Настройки -> HostGuard
 
-const CHECK_TICKS = 12;
-const MIN_ALLOWED = 48;
-const LAG_MULT = 2.5;
-const VEL_MULT = 2;
-const GRACE_CHECKS = 1;
-const BASE_SECONDS = 60;
-const PVP_BAN_AT = 3;
-const LAG_FRAME_DELTA = 2;   // кадр дольше 2 тиков (лаг сервера/фризы) - проверку пропускаем
-const LAG_REAL_MS = 150;     // запас сверх нормального интервала между проверками (CHECK_TICKS тиков = 200 мс при 60 fps): дольше - лаг
 
 // Первые RETURN_FIRST нарушений игрока просто возвращают его в последнюю безопасную точку
 // без наказания. Начиная со следующего - обычное наказание (заморозка/derelict, в PvP - предупреждения и бан).
 // 0 - сразу наказывать, как раньше.
-const RETURN_FIRST = 2;
 
 // После возврата клиент ещё какое-то время может слать старую (читерскую) позицию.
 // Пока игрок не "встал" на место (в пределах RETURN_TOLERANCE), проверки не идут и нарушением это не считается.
-const RETURN_TOLERANCE = 24;      // допуск от точки возврата (в юнитах мира, 8 = 1 тайл)
-const RETURN_SETTLE_CHECKS = 20;  // сколько проверок ждать, пока клиент примет позицию
 
-const LOG_ONLY = false; // true: только писать в лог и чат, без наказаний
 let enabled = true;     // античит включён (переключается командой /anticheat)
 
 function serverActive() {
@@ -164,20 +152,24 @@ function release(p) {
     Call.sendMessage("[scarlet][anticheat][white] " + p.name + "[white] наказание снято");
 }
 
-function pvpViolation(p, moved, allowed) {
+function describe(moved, allowed, info) {
+    return info != null ? info : "рывок на " + Math.round(moved) + " (допустимо " + Math.round(allowed) + ")";
+}
+
+function pvpViolation(p, moved, allowed, info) {
     const uuid = p.uuid();
     const n = (pvpStrikes[uuid] || 0) + 1;
     pvpStrikes[uuid] = n;
 
     delete last[p.id];
 
-    if (n >= PVP_BAN_AT) {
-        Call.sendMessage("[scarlet][anticheat][white] " + p.name + "[white] рывок на " + Math.round(moved) + " (допустимо " + Math.round(allowed) + "). Нарушение №" + n + ", бан");
+    if (n >= S.get("pvp_ban_at")) {
+        Call.sendMessage("[scarlet][anticheat][white] " + p.name + "[white] " + describe(moved, allowed, info) + ". Нарушение №" + n + ", бан");
         Log.info("[anticheat] " + p.name + " (" + uuid + ") нарушение " + n + ", бан");
         Vars.netServer.admins.banPlayerID(uuid);
         p.kick("Бан за читы (телепорт/ускорение)");
     } else {
-        p.sendMessage("[scarlet][anticheat][white] рывок на " + Math.round(moved) + " (допустимо " + Math.round(allowed) + "). Предупреждение " + n + "/" + PVP_BAN_AT);
+        p.sendMessage("[scarlet][anticheat][white] " + describe(moved, allowed, info) + ". Предупреждение " + n + "/" + S.get("pvp_ban_at"));
     }
 }
 
@@ -194,7 +186,7 @@ function moveBack(p, u) {
     }
 
     delete last[p.id];
-    pending[p.id] = { unit: u, x: s.x, y: s.y, left: RETURN_SETTLE_CHECKS };
+    pending[p.id] = { unit: u, x: s.x, y: s.y, left: S.get("return_settle") };
     return true;
 }
 
@@ -209,7 +201,7 @@ function holdPending(p, u) {
 
     pend.left--;
     const off = Mathf.dst(u.x, u.y, pend.x, pend.y);
-    if (off > RETURN_TOLERANCE && pend.left > 0) {
+    if (off > S.get("return_tolerance") && pend.left > 0) {
         try {
             u.set(pend.x, pend.y);
             u.vel.setZero();
@@ -223,27 +215,34 @@ function holdPending(p, u) {
 }
 
 function tryReturn(p, u, desc) {
-    if (RETURN_FIRST <= 0) return false;
+    if (S.get("return_first") <= 0) return false;
 
     const s = safe[p.id];
     if (s == null || s.unit != u) return false;
 
     const uuid = p.uuid();
     const n = (returns[uuid] || 0) + 1;
-    if (n > RETURN_FIRST) return false;
+    if (n > S.get("return_first")) return false;
     returns[uuid] = n;
 
     moveBack(p, u);
 
-    p.sendMessage("[scarlet][anticheat][white] " + desc + ". Возврат в исходную точку " + n + "/" + RETURN_FIRST);
+    p.sendMessage("[scarlet][anticheat][white] " + desc + ". Возврат в исходную точку " + n + "/" + S.get("return_first"));
     return true;
 }
 
-function punish(p, moved, allowed) {
+function punish(p, moved, allowed, info) {
     delete returns[p.uuid()];
 
     if (Vars.state.rules.pvp) {
-        pvpViolation(p, moved, allowed);
+        if (!S.get("pvp_punish")) {
+            // наказания в PvP отключены: нарушителя уже вернули на место, страйки и бан не выдаём
+            S.debug("PvP: наказание отключено, " + p.plainName() + " рывок " + Math.round(moved) + " / допустимо " + Math.round(allowed));
+            delete last[p.id];
+            p.sendMessage("[scarlet][anticheat][white] Рывок отменён, тебя вернули на место.");
+            return;
+        }
+        pvpViolation(p, moved, allowed, info);
         return;
     }
 
@@ -252,11 +251,11 @@ function punish(p, moved, allowed) {
     strikes[uuid] = n;
 
     const what = punishMode() == "freeze" ? "заморозка" : "derelict";
-    const secs = n * BASE_SECONDS;
+    const secs = n * S.get("base_seconds");
     jail[uuid] = secs * 1000;
     homeTeam[uuid] = p.team();
 
-    Call.sendMessage("[scarlet][anticheat][white] " + p.name + "[white] рывок на " + Math.round(moved) + " (допустимо " + Math.round(allowed) + "). Нарушение №" + n + ", " + what + " на " + fmt(secs));
+    Call.sendMessage("[scarlet][anticheat][white] " + p.name + "[white] " + describe(moved, allowed, info) + ". Нарушение №" + n + ", " + what + " на " + fmt(secs));
 
     delete last[p.id];
     applyJail(p);
@@ -406,20 +405,21 @@ Events.run(Trigger.update, () => {
     accDelta += Time.delta;
     if (Time.delta > maxFrameDelta) maxFrameDelta = Time.delta;
 
-    if (tick % CHECK_TICKS != 0) return;
+    if (tick % S.get("check_ticks") != 0) return;
 
     const now = Time.millis();
     const dt = Math.min(now - lastCheck, 2000);
     lastCheck = now;
 
-    const elapsed = Math.max(accDelta, dt / 1000 * 60, CHECK_TICKS);
-    const lagged = wasPaused || maxFrameDelta > LAG_FRAME_DELTA || dt > CHECK_TICKS / 60 * 1000 + LAG_REAL_MS;
+    const elapsed = Math.max(accDelta, dt / 1000 * 60, S.get("check_ticks"));
+    const lagged = wasPaused || maxFrameDelta > S.get("lag_frame_delta") || dt > S.get("check_ticks") / 60 * 1000 + S.get("lag_real_ms");
     accDelta = 0;
     maxFrameDelta = 0;
 
     if (!active()) return;
 
     if (lagged) {
+        S.debug("лаг: проверка пропущена (пауза=" + wasPaused + ", maxFrameDelta=" + maxFrameDelta.toFixed(1) + ", dt=" + dt + " мс)");
         wasPaused = false;
         for (let key in last) delete last[key];
     }
@@ -461,13 +461,13 @@ Events.run(Trigger.update, () => {
             if (tile != null) {
                 const floor = tile.floor();
                 if (!floor.isLiquid) {
-                    if (LOG_ONLY) {
+                    if (S.get("log_only")) {
                         Log.info("[anticheat] " + p.name + " корабль на суше (" + floor.name + ")");
                         Call.sendMessage("[scarlet][anticheat][white] " + p.name + "[white] корабль на суше");
                     } else {
                         if (!tryReturn(p, u, "корабль на суше")) {
                             moveBack(p, u);
-                            punish(p, 999, 0);
+                            punish(p, 999, 0, "корабль на суше");
                         }
                     }
                     delete last[p.id];
@@ -477,7 +477,7 @@ Events.run(Trigger.update, () => {
         }
 
         if (r == null || r.unit != u || r.type != u.type) {
-            last[p.id] = { unit: u, type: u.type, x: u.x, y: u.y, grace: GRACE_CHECKS };
+            last[p.id] = { unit: u, type: u.type, x: u.x, y: u.y, grace: S.get("grace_checks") };
             safe[p.id] = { unit: u, x: u.x, y: u.y };
             return;
         }
@@ -491,22 +491,33 @@ Events.run(Trigger.update, () => {
         }
 
         const moved = Mathf.dst(u.x, u.y, r.x, r.y);
-        const allowed = Math.max(u.speed() * elapsed * LAG_MULT, MIN_ALLOWED);
-        const maxVel = u.speed() * VEL_MULT;
+        const allowed = Math.max(u.speed() * elapsed * S.get("lag_mult"), S.get("min_allowed"));
+        const velMult = S.get("vel_mult");
+        const maxVel = u.speed() * velMult;
         const curVel = u.vel.len();
+        // множитель 0.0 отключает проверку скорости (иначе допустимая скорость была бы нулевой)
+        const fast = velMult > 0 && curVel > maxVel;
 
-        if (moved > allowed || curVel > maxVel) {
-            if (LOG_ONLY) {
-                Log.info("[anticheat] " + p.name + " рывок на " + Math.round(moved) + " / vel " + Math.round(curVel));
-                Call.sendMessage("[scarlet][anticheat][white] " + p.name + "[white] рывок на " + Math.round(moved));
+        if (moved > allowed || fast) {
+            // ускорение (скорость выше допустимой) отличаем от рывка/телепорта (слишком большое смещение)
+            const speedHack = fast;
+            const kind = speedHack ? "ускорение" : "рывок";
+            const info = speedHack
+                ? "ускорение: скорость " + curVel.toFixed(1) + " (допустимо " + maxVel.toFixed(1) + ")"
+                : "рывок на " + Math.round(moved) + " (допустимо " + Math.round(allowed) + ")";
+            S.debug(p.plainName() + ": " + kind + ", смещение " + Math.round(moved) + " (допустимо " + Math.round(allowed) + "), vel " + curVel.toFixed(2) + " (макс " + maxVel.toFixed(2) + "), тиков " + Math.round(elapsed));
+            if (S.get("log_only")) {
+                Log.info("[anticheat] " + p.name + " " + info);
+                Call.sendMessage("[scarlet][anticheat][white] " + p.name + "[white] " + info);
                 r.x = u.x;
                 r.y = u.y;
                 return;
             }
-            const jump = Math.max(moved, curVel);
-            if (!tryReturn(p, u, "рывок на " + Math.round(jump) + " (допустимо " + Math.round(allowed) + ")")) {
+            const jump = speedHack ? curVel : moved;
+            const lim = speedHack ? maxVel : allowed;
+            if (!tryReturn(p, u, info)) {
                 moveBack(p, u);
-                punish(p, jump, allowed);
+                punish(p, jump, lim, info);
             }
         } else {
             r.x = u.x;

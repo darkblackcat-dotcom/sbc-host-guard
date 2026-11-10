@@ -1,3 +1,4 @@
+const S = require("hgsettings"); // числовые настройки берутся из меню: Настройки -> HostGuard
 
 const ac = require("anticheat");
 
@@ -7,13 +8,9 @@ function active() {
     return enabled && ac.isServer();
 }
 
-const NEWBIE_MINUTES = 5;  // сколько минут игрок считается новичком
-const AUTO_TRUST = true;    // true: после NEWBIE_MINUTES игрок становится доверенным до закрытия сервера
-const LOG_MAX = 5000;       // сколько записей хранить в журнале
 const LOG_PER_PAGE = 16;     // строк на странице /log
 const DANGEROUS_BLOCKS = ["thorium-reactor"]; // внутренние имена блоков, добавляйте свои
 // Опасные блоки возле ядра (DANGER_RADIUS_TILES) могут ставить ТОЛЬКО хост и админы.
-const DANGER_RADIUS_TILES = 25;               // радиус от ядра (в тайлах)
 const OWN_ONLY = ["breakBlock", "configure", "rotate"]; // новичок может это делать только со своими блоками
 
 const actionLog = [];        // записи: { t, u, n, a: "p"|"b", blk, x, y, rot, team, cfg }
@@ -33,7 +30,7 @@ function isRestricted(p) {
     const now = Time.millis();
     if (joined[uuid] == null) joined[uuid] = now;
 
-    if (AUTO_TRUST && now - joined[uuid] >= NEWBIE_MINUTES * 60000) {
+    if (S.get("auto_trust") && now - joined[uuid] >= S.get("newbie_minutes") * 60000) {
         trusted[uuid] = true;
         return false;
     }
@@ -69,7 +66,7 @@ function pushLog(e) {
     if (last != null && last.u == e.u && last.a == e.a && last.x == e.x && last.y == e.y && last.blk == e.blk) return;
 
     actionLog.push(e);
-    if (actionLog.length > LOG_MAX) actionLog.splice(0, 500);
+    if (actionLog.length > S.get("log_max")) actionLog.splice(0, 500);
 }
 
 function revert(e) {
@@ -162,7 +159,7 @@ function dangerNearCore(p, action) {
 
     const wx = tile.worldx();
     const wy = tile.worldy();
-    const r = DANGER_RADIUS_TILES * Vars.tilesize;
+    const r = S.get("danger_radius") * Vars.tilesize;
 
     let near = false;
     p.team().data().cores.each(core => {
@@ -261,7 +258,7 @@ Events.on(PlayerJoin, e => {
     const p = e.player;
     joined[p.uuid()] = Time.millis();
     if (active() && !ac.isAdmin(p) && !trusted[p.uuid()]) {
-        p.sendMessage("[accent]Первые " + NEWBIE_MINUTES + " мин нельзя ломать и заменять чужие блоки.");
+        p.sendMessage("[accent]Первые " + S.get("newbie_minutes") + " мин нельзя ломать и заменять чужие блоки.");
     }
 });
 
@@ -299,8 +296,8 @@ function updateHud() {
             const uuid = p.uuid();
             if (ac.jail[uuid] != null) return;
             if (isRestricted(p)) {
-                if (AUTO_TRUST && joined[uuid] != null) {
-                    const left = NEWBIE_MINUTES * 60000 - (Time.millis() - joined[uuid]);
+                if (S.get("auto_trust") && joined[uuid] != null) {
+                    const left = S.get("newbie_minutes") * 60000 - (Time.millis() - joined[uuid]);
                     Call.setHudText(p.con, "[accent]До конца статуса новичка: [white]" + fmtTime(left));
                     hudShown[uuid] = true;
                 }
@@ -446,7 +443,7 @@ function cmdTrust(args, player, on) {
     }
     if (on) trusted[t.uuid] = true;
     else delete trusted[t.uuid];
-    player.sendMessage("[green]" + t.name + (on ? " теперь доверенный." : " больше не доверенный (снова новичок на " + NEWBIE_MINUTES + " мин)."));
+    player.sendMessage("[green]" + t.name + (on ? " теперь доверенный." : " больше не доверенный (снова новичок на " + S.get("newbie_minutes") + " мин)."));
     if (!on) joined[t.uuid] = Time.millis();
 }
 

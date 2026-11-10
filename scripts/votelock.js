@@ -1,7 +1,7 @@
+const S = require("hgsettings"); // числовые настройки берутся из меню: Настройки -> HostGuard
 
 const ac = require("anticheat");
 
-const MSG_COOLDOWN = 2000; // мс между сообщениями игроку
 
 const AT = Packages.mindustry.net.Administration$ActionType;
 let enabled = true;   // блокировка включена (переключается командой /votelock)
@@ -34,7 +34,7 @@ Vars.netServer.admins.addActionFilter(action => {
     if (target == null || target.uuid() != p.uuid()) return true;
 
     const now = Time.millis();
-    if (now - lastMsg > MSG_COOLDOWN) {
+    if (now - lastMsg > S.get("msg_cooldown")) {
         lastMsg = now;
         p.sendMessage("[scarlet]Пока идёт голосование против тебя, строить нельзя.");
     }
